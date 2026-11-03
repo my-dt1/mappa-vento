@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mappa del vento - Sardegna (ESRI)</title>
+<script type="module" src="https://js.arcgis.com/5.1/"></script>
+<style>
+  html,body{height:100%;margin:0;font:14px sans-serif}
+  #bar{position:absolute;z-index:10;left:12px;right:12px;bottom:18px;background:#fffc;padding:8px 12px;border-radius:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  #bar input[type=range]{flex:1;min-width:120px}
+  #legend{max-width:280px;position:absolute;z-index:10;right:12px;top:12px;background:#fffc;padding:6px 10px;border-radius:6px;font:12px sans-serif}
+  #legend div{display:flex;gap:6px;align-items:center;margin:2px 0}#legend i{width:120px;height:10px;border-radius:2px}
+</style></head><body>
+<arcgis-map center="9.0,40.1" zoom="8"><arcgis-zoom slot="top-left"></arcgis-zoom></arcgis-map>
+<div id="legend"><div id="legVento"></div><div id="legCampo"></div></div>
+<div id="bar">
+  <select id="day"></select><button id="pgiorni" title="scorri i giorni">▶ giorni</button>
+  <label><input type="checkbox" id="windOn" checked> Vento</label>
+  <label>Campo <select id="campo"><option value="rain">Pioggia</option><option value="temp">Temperatura</option><option value="">Nessuno</option></select></label>
+  <label><input type="checkbox" id="stazioniOn" checked> Stazioni</label>
+  <label>Base <select id="base"><option>Scura canvas (Esri)</option><option>Chiara canvas (Esri)</option><option>OpenStreetMap</option></select></label>
+  <button id="play">▶</button><input id="t" type="range" min="0" max="23" value="12"><span id="lbl"></span>
+</div>
+<script type="module">
+const [Map, Basemap, TileLayer, WebTileLayer, ImageryTileLayer, GeoJSONLayer, FlowRenderer] = await $arcgis.import([
+  "@arcgis/core/Map.js", "@arcgis/core/Basemap.js", "@arcgis/core/layers/TileLayer.js", "@arcgis/core/layers/WebTileLayer.js",
+  "@arcgis/core/layers/ImageryTileLayer.js", "@arcgis/core/layers/GeoJSONLayer.js", "@arcgis/core/renderers/FlowRenderer.js"]);
+const $ = id => document.getElementById(id);
+const view = document.querySelector("arcgis-map");
+
+// ---- basi: servizi pubblici Esri e OSM, senza chiave (CARTO ora richiede una chiave) ----
+const canvas = nome => new TileLayer({url: `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${nome}/MapServer`});
+const BASI = {
+  "Scura canvas (Esri)": () => canvas("World_Dark_Gray_Base"),
+  "Chiara canvas (Esri)": () => canvas("World_Light_Gray_Base"),
+  "OpenStreetMap": () => new WebTileLayer({urlTemplate: "https://tile.openstreetmap.org/{level}/{col}/{row}.png", copyright: "© OpenStreetMap"})
+};
+const BASI_SCURE = ["Scura canvas (Esri)"];
+let scuro = true;  // il tema segue la base: colori chiari su sfondo scuro
+const mappa = new Map({basemap: new Basemap({baseLayers: [BASI["Scura canvas (Esri)"]()]})});
+view.map = mappa;
+await view.componentOnReady();
+
+// ---- layer in posizioni fisse: bande < linee < vento < stazioni < costa ----
+const SLOT = {bande: 0, linee: 1, vento: 2, stazioni: 3, costa: 4}, slot = [];
+function metti(nome, layer) {
+  const i = SLOT[nome], vecchio = slot[i];
+  if (vecchio) { mappa.remove(vecchio); if (vecchio.blob) URL.revokeObjectURL(vecchio.blob); }
+  slot[i] = layer;
+  if (layer) mappa.add(layer, slot.slice(0, i).filter(Boolean).length);
+}
+const geojson = (fc, renderer, extra = {}) => {  // GeoJSON costruito a runtime: i dati sono gli stessi della pagina Leaflet
+  const blob = URL.createObjectURL(new Blob([JSON.stringify(fc)], {type: "application/json"}));
+  const l = new GeoJSONLayer({url: blob, renderer, popupEnabled: false, ...extra}); l.blob = blob; return l;
+};
+
+// ---- vento (flusso) ----
+const COLORI = ["#313695","#4575b4","#2c9fb8","#41ab5d","#e8a317","#f46d43","#d73027","#a50026"];  // base chiara: debole -> forte
+const COLORI_SCURI = ["#7fb9ff","#4fd6e8","#5fe39a","#c4f04d","#ffd23f","#ff9a3c","#ff5a4d","#ff3d9a"];
+const coloriVento = () => scuro ? COLORI_SCURI : COLORI;
+const rendererVento = () => new FlowRenderer({  // flow-from e' il default ed e' il verso corretto (verificato)
+  trailWidth: "2.5px", density: 1, flowSpeed: 20, trailLength: 150,
+  visualVariables: [{type: "color", field: "Magnitude", stops: coloriVento().map((color, i) => ({value: i * 12 / 7, color}))}]});
+function legendaVento() {
+  $("legVento").innerHTML = `<span>Vento 0</span><i style="background:linear-gradient(90deg,${coloriVento().join(",")})"></i><span>12+ m/s</span>`;
+}
+const GIORNO = () => $("day").value, ORA = () => String($("t").value).padStart(2, "0");
+let ventoSeq = 0;
+async function disegnaVento() {
+  const mio = ++ventoSeq;
+  $("lbl").textContent = `${ORA()}:00`;
+  if (!$("windOn").checked) { metti("vento", null); return; }
+  const l = new ImageryTileLayer({url: new URL(`data/uv/${GIORNO()}T${ORA()}.tif`, location.href).href, renderer: rendererVento()});
+  try {
+    await l.load();
+    if (mio !== ventoSeq) return;  // nel frattempo l'utente ha cambiato ora: scarto questa
+    metti("vento", l);
+  } catch (e) { console.error("vento", e); }
+}
+
+// ---- campi colorati: i livelli devono coincidere con LIVELLI in scripts/contour_field.py ----
+const CAMPI = {
+  rain: {nome: "Pioggia", unita: "mm", liv: [0.2, 1, 2, 5, 10, 20, 35, 50, 80],
+         col: ["#e5f5e0", "#6abe7e", "#a0c655", "#fecc49", "#fd8d3c", "#e03624", "#be1444", "#8e1072", "#4a1486"], linea: "#4a1486"},
+  temp: {nome: "Temperatura", unita: "°C", liv: [0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+         col: ["#5e3c99", "#4858a6", "#3273b2", "#2e8eb8", "#30a8ba", "#40bab1", "#62c296", "#86cb7c", "#b8d664", "#ebe14d", "#f3ca45", "#f4ad3f", "#ee8436", "#e05328", "#cc2a1b", "#a6150e", "#7f0000"], linea: "#333"}
+};
+const dati = {};
+const fc = features => ({type: "FeatureCollection", features});
+function disegnaCampo() {
+  const k = $("campo").value, c = CAMPI[k], d = c && dati[k];
+  $("legCampo").innerHTML = c
+    ? `<span>${c.nome} ${c.liv[0]}</span><i style="width:140px;background:linear-gradient(90deg,${c.col.join(",")})"></i><span>${c.liv[c.liv.length - 1]}+ ${c.unita}</span>` : "";
+  if (!d) { metti("bande", null); metti("linee", null); metti("stazioni", null); return; }
+  const i = d.raw.giorni.indexOf(GIORNO()), g = d.iso && d.iso[GIORNO()];
+  if (i < 0) { metti("bande", null); metti("linee", null); metti("stazioni", null); return; }
+  if (g) {
+    metti("bande", geojson(g.bande, {type: "class-breaks", field: "da", classBreakInfos: c.liv.map((lo, j) => ({  // intervalli stretti: il valore e' esatto
+      minValue: lo - 1e-6, maxValue: lo + 1e-6, symbol: {type: "simple-fill", color: [...hex(c.col[j]), 0.55], outline: {width: 0}}}))}, {opacity: 1}));
+    metti("linee", geojson(g.linee, {type: "simple", symbol: {type: "simple-line", color: scuro ? [240, 240, 240, 0.55] : [...hex(c.linea), 0.7], width: 0.8}}));
+  } else { metti("bande", null); metti("linee", null); }
+  if (!$("stazioniOn").checked) { metti("stazioni", null); return; }
+  const punti = d.raw.stazioni.filter(s => s.v[i] != null).map(s => ({  // dato mancante: non e' 0
+    type: "Feature", geometry: {type: "Point", coordinates: [s.lon, s.lat]}, properties: {nome: s.nome, v: s.v[i], unita: c.unita}}));
+  metti("stazioni", geojson(fc(punti), {type: "simple", symbol: {type: "simple-marker", size: 6, color: scuro ? "#223" : "#fff",
+    outline: {color: scuro ? "#dde6ee" : c.linea, width: 1}}},
+    {popupEnabled: true, popupTemplate: {title: "{nome}", content: `{v} ${c.unita}`}}));
+}
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+// ---- costa ----
+fetch("../data/sardegna.geojson").then(r => r.json()).then(g => {
+  const colore = () => scuro ? [159, 180, 199, 1] : [68, 68, 68, 1];
+  window.coloreCosta = () => { const l = slot[SLOT.costa]; if (l) l.renderer = {type: "simple", symbol: {type: "simple-fill", color: [0, 0, 0, 0], outline: {color: colore(), width: 1}}}; };
+  metti("costa", geojson(fc([g]), {type: "simple", symbol: {type: "simple-fill", color: [0, 0, 0, 0], outline: {color: colore(), width: 1}}}, {popupEnabled: false}));
+}).catch(() => {});
+
+// ---- tema e controlli ----
+function aggiornaTema() { window.coloreCosta && window.coloreCosta(); legendaVento(); disegnaCampo(); disegnaVento(); }
+$("base").onchange = () => {
+  mappa.basemap = new Basemap({baseLayers: [BASI[$("base").value]()]});
+  scuro = BASI_SCURE.includes($("base").value); aggiornaTema();
+};
+$("campo").onchange = $("stazioniOn").onchange = disegnaCampo;
+$("windOn").onchange = disegnaVento;
+$("t").oninput = disegnaVento;
+$("day").onchange = () => { disegnaCampo(); disegnaVento(); };
+const STEP_MS = 5000;  // durata di ogni ora
+let timer, dayTimer;
+$("play").onclick = e => {
+  if (timer) { clearInterval(timer); timer = null; e.target.textContent = "▶"; return; }
+  e.target.textContent = "⏸"; timer = setInterval(() => { $("t").value = (+$("t").value + 1) % 24; disegnaVento(); }, STEP_MS);
+};
+$("pgiorni").onclick = e => {
+  if (dayTimer) { clearInterval(dayTimer); dayTimer = null; e.target.textContent = "▶ giorni"; return; }
+  e.target.textContent = "⏸ giorni";
+  dayTimer = setInterval(() => { const s = $("day"); s.selectedIndex = (s.selectedIndex + 1) % s.options.length; s.onchange(); }, 4000);
+};
+
+// ---- avvio ----
+legendaVento();
+for (const k of Object.keys(CAMPI))
+  Promise.all([fetch(`../data/${k}.json`), fetch(`../data/${k}-iso.json`)].map(f => f.then(r => r.ok ? r.json() : null)))
+    .then(([raw, iso]) => { if (raw) { dati[k] = {raw, iso}; disegnaCampo(); } }).catch(() => {});
+const giorni = await (await fetch("../data/days.json")).json();
+$("day").innerHTML = giorni.map(d => `<option>${d}</option>`).join("");
+const q = new URLSearchParams(location.search).get("day");
+$("day").value = giorni.includes(q) ? q : giorni[0];
+disegnaVento();
+</script></body></html>
