@@ -29,6 +29,7 @@ function show(i) {
 }
 const rainLayer = L.layerGroup().addTo(map), rainOn = document.getElementById("rainOn");
 let rain;
+fetch("data/sardegna.geojson").then(r => r.json()).then(g => L.geoJSON(g, {interactive: false, style: {color: "#444", weight: 1, fill: false}}).addTo(map)).catch(() => {});
 const LIV = [0.2, 1, 2, 5, 10, 20, 35, 50, 80];  // mm, come in scripts/contour_rain.py
 const BLU = ["#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#3182bd", "#08519c", "#6a51a3", "#54278f", "#3f007d"];
 let iso;
