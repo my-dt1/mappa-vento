@@ -1,5 +1,6 @@
-"""Pioggia giornaliera (PCG, mm) di tutte le stazioni attive in un intervallo di giorni.
-Uso: WIND_API_KEY=... python scripts/fetch_rain.py 2026-03-01 2026-03-07  ->  data/rain.json"""
+"""Una grandezza giornaliera di tutte le stazioni attive in un intervallo di giorni.
+Uso: WIND_API_KEY=... python scripts/fetch_daily.py PCG rain 2026-03-01 2026-03-07  ->  data/rain.json
+     (PCG = pioggia mm; TCG = temperatura media giornaliera)"""
 import json, os, sys, time, urllib.request, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -7,7 +8,7 @@ from pyproj import Transformer
 
 B = "https://hmj6uzslsb.execute-api.eu-north-1.amazonaws.com/v1"
 KEY = os.environ["WIND_API_KEY"]
-da, a = sys.argv[1], sys.argv[2]
+codice, nome, da, a = sys.argv[1:5]
 giorni = [(date.fromisoformat(da) + timedelta(n)).isoformat() for n in range((date.fromisoformat(a) - date.fromisoformat(da)).days + 1)]
 
 def get(path, params):
@@ -20,7 +21,7 @@ def get(path, params):
     raise err
 
 def station(s):
-    r = get("misure", {"stazione": s["cod_stazione"], "da": da, "a": a, "grandezza": "PCG", "limit": 999})
+    r = get("misure", {"stazione": s["cod_stazione"], "da": da, "a": a, "grandezza": codice, "limit": 999})
     mm = {m["data_misura"][:10]: m["valore"] for m in r["dati"] if m["valore"] is not None}
     return s, [mm.get(g) for g in giorni]  # None = dato mancante, diverso da 0 mm
 
@@ -29,7 +30,7 @@ stazioni = [s for s in get("stazioni", {}) if s["data_fine"] is None and s["wgs8
 with ThreadPoolExecutor(3) as ex:
     res = [(s, v) for s, v in ex.map(station, stazioni) if any(x is not None for x in v)]
 out = {"giorni": giorni, "stazioni": [
-    {"cod": s["cod_stazione"], "nome": s["nome"], "lon": round(lon, 5), "lat": round(lat, 5), "mm": v}
+    {"cod": s["cod_stazione"], "nome": s["nome"], "lon": round(lon, 5), "lat": round(lat, 5), "v": v}
     for s, v in res for lon, lat in [to_ll.transform(s["wgs84_est"], s["wgs84_nord"])]]}
-json.dump(out, open("data/rain.json", "w"), ensure_ascii=False)
-print(f"{len(out['stazioni'])} stazioni con pioggia su {len(stazioni)} attive, {len(giorni)} giorni")
+json.dump(out, open(f"data/{nome}.json", "w"), ensure_ascii=False)
+print(f"{len(out['stazioni'])} stazioni con {codice} su {len(stazioni)} attive, {len(giorni)} giorni")

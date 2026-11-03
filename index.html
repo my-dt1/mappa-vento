@@ -3,17 +3,17 @@
 <title>Mappa del vento - Sardegna</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.css">
-<style>html,body,#map{height:100%;margin:0}#bar{position:absolute;z-index:1000;left:12px;right:12px;bottom:18px;background:#fffc;padding:8px 12px;border-radius:6px;font:14px sans-serif;display:flex;gap:10px;align-items:center}#bar input[type=range]{flex:1}#legend{flex-wrap:wrap;max-width:260px;position:absolute;z-index:1000;right:12px;top:12px;background:#fffc;padding:6px 10px;border-radius:6px;font:12px sans-serif;display:flex;gap:6px;align-items:center}#legend i{width:120px;height:10px;border-radius:2px}</style>
+<style>html,body,#map{height:100%;margin:0}#bar{position:absolute;z-index:1000;left:12px;right:12px;bottom:18px;background:#fffc;padding:8px 12px;border-radius:6px;font:14px sans-serif;display:flex;gap:10px;align-items:center;flex-wrap:wrap}#bar input[type=range]{flex:1;min-width:120px}#legend{max-width:260px;position:absolute;z-index:1000;right:12px;top:12px;background:#fffc;padding:6px 10px;border-radius:6px;font:12px sans-serif}#legend div{display:flex;gap:6px;align-items:center;margin:2px 0}#legend i{width:120px;height:10px;border-radius:2px}</style>
 </head><body>
 <div id="map"></div>
-<div id="legend"><span>0</span><i style="background:linear-gradient(90deg,#313695,#4575b4,#2c9fb8,#41ab5d,#e8a317,#f46d43,#d73027,#a50026)"></i><span>12+ m/s</span><br><span>Pioggia (mm/giorno)</span><i style="width:200px;background:linear-gradient(90deg,#deebf7,#c6dbef,#9ecae1,#6baed6,#3182bd,#08519c,#6a51a3,#54278f,#3f007d)"></i><span>0,2</span><span>80+</span></div>
-<div id="bar"><select id="day"></select><button id="pgiorni" title="scorri i giorni">▶ giorni</button><label><input type="checkbox" id="windOn" checked> Vento</label><label><input type="checkbox" id="rainOn" checked> Pioggia</label><button id="play">▶</button><input id="t" type="range" min="0" value="0"><span id="lbl"></span></div>
+<div id="legend"><div><span>Vento 0</span><i style="background:linear-gradient(90deg,#313695,#4575b4,#2c9fb8,#41ab5d,#e8a317,#f46d43,#d73027,#a50026)"></i><span>12+ m/s</span></div><div id="legCampo"></div></div>
+<div id="bar"><select id="day"></select><button id="pgiorni" title="scorri i giorni">▶ giorni</button><label><input type="checkbox" id="windOn" checked> Vento</label><label>Campo <select id="campo"><option value="rain">Pioggia</option><option value="temp">Temperatura</option><option value="">Nessuno</option></select></label><button id="play">▶</button><input id="t" type="range" min="0" value="0"><span id="lbl"></span></div>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.js"></script>
 <script>
 const map = L.map("map").setView([40.1, 9.0], 8);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "© OpenStreetMap", maxZoom: 12}).addTo(map);
-const COLORI = ["#313695","#4575b4","#2c9fb8","#41ab5d","#e8a317","#f46d43","#d73027","#a50026"];  // debole -> forte
+const COLORI = ["#313695","#4575b4","#2c9fb8","#41ab5d","#e8a317","#f46d43","#d73027","#a50026"];  // vento: debole -> forte
 const STEP_MS = 5000;  // durata di ogni ora
 let layer, frames, timer;
 const daySel = document.getElementById("day"), windOn = document.getElementById("windOn");
@@ -27,32 +27,40 @@ function show(i) {
   layer = L.velocityLayer({data: f, velocityScale: 0.01, minVelocity: 0, maxVelocity: 12, lineWidth: 2.5, particleAge: 120, colorScale: COLORI, displayValues: true,
     displayOptions: {velocityType: "Vento", position: "bottomleft", emptyString: "nessun dato", speedUnit: "ms"}}).addTo(map);
 }
-const rainLayer = L.layerGroup().addTo(map), rainOn = document.getElementById("rainOn");
-let rain;
 fetch("data/sardegna.geojson").then(r => r.json()).then(g => L.geoJSON(g, {interactive: false, style: {color: "#444", weight: 1, fill: false}}).addTo(map)).catch(() => {});
-const LIV = [0.2, 1, 2, 5, 10, 20, 35, 50, 80];  // mm, come in scripts/contour_rain.py
-const BLU = ["#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#3182bd", "#08519c", "#6a51a3", "#54278f", "#3f007d"];
-let iso;
-function drawRain() {
-  rainLayer.clearLayers();
-  if (!rain || !rainOn.checked) return;
-  const i = rain.giorni.indexOf(daySel.value);
+
+// Campi colorati: i livelli devono coincidere con LIVELLI in scripts/contour_field.py
+const CAMPI = {
+  rain: {nome: "Pioggia", unita: "mm", liv: [0.2, 1, 2, 5, 10, 20, 35, 50, 80],
+         col: ["#e5f5e0", "#6abe7e", "#a0c655", "#fecc49", "#fd8d3c", "#e03624", "#be1444", "#8e1072", "#4a1486"], linea: "#4a1486"},
+  temp: {nome: "Temperatura", unita: "°C", liv: [0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+         col: ["#5e3c99", "#4858a6", "#3273b2", "#2e8eb8", "#30a8ba", "#40bab1", "#62c296", "#86cb7c", "#b8d664", "#ebe14d", "#f3ca45", "#f4ad3f", "#ee8436", "#e05328", "#cc2a1b", "#a6150e", "#7f0000"], linea: "#333"}
+};
+const dati = {}, campoSel = document.getElementById("campo"), campoLayer = L.layerGroup().addTo(map);
+function drawCampo() {
+  campoLayer.clearLayers();
+  const c = CAMPI[campoSel.value], d = c && dati[campoSel.value];
+  document.getElementById("legCampo").innerHTML = c
+    ? `<span>${c.nome} ${c.liv[0]}</span><i style="width:140px;background:linear-gradient(90deg,${c.col.join(",")})"></i><span>${c.liv[c.liv.length - 1]}+ ${c.unita}</span>` : "";
+  if (!d) return;
+  const i = d.raw.giorni.indexOf(daySel.value);
   if (i < 0) return;
-  const g = iso && iso[daySel.value];
+  const g = d.iso && d.iso[daySel.value];
   if (g) {
-    L.geoJSON(g.bande, {interactive: false, style: f => ({stroke: false, fillColor: BLU[LIV.indexOf(f.properties.da)], fillOpacity: 0.45})}).addTo(rainLayer);
-    L.geoJSON(g.linee, {interactive: false, style: {color: "#08306b", weight: 1, opacity: 0.7}}).addTo(rainLayer);
+    L.geoJSON(g.bande, {interactive: false, style: f => ({stroke: false, fillColor: c.col[c.liv.indexOf(f.properties.da)], fillOpacity: 0.45})}).addTo(campoLayer);
+    L.geoJSON(g.linee, {interactive: false, style: {color: c.linea, weight: 1, opacity: 0.7}}).addTo(campoLayer);
   }
-  for (const s of rain.stazioni) {
-    const mm = s.mm[i];
-    if (mm == null) continue;  // dato mancante: non è 0 mm
-    L.circleMarker([s.lat, s.lon], {radius: 3, color: "#08306b", weight: 1, fillColor: mm > 0 ? "#fff" : "#999", fillOpacity: 0.9})
-      .bindTooltip(`${s.nome}: ${mm} mm`).addTo(rainLayer);
+  for (const s of d.raw.stazioni) {
+    const v = s.v[i];
+    if (v == null) continue;  // dato mancante: non è 0
+    L.circleMarker([s.lat, s.lon], {radius: 3, color: c.linea, weight: 1, fillColor: "#fff", fillOpacity: 0.9})
+      .bindTooltip(`${s.nome}: ${v} ${c.unita}`).addTo(campoLayer);
   }
 }
-rainOn.onchange = drawRain;
-Promise.all([fetch("data/rain.json"), fetch("data/rain-iso.json")].map(f => f.then(r => r.ok ? r.json() : null)))
-  .then(([r, g]) => { rain = r; iso = g; drawRain(); }).catch(() => {});
+campoSel.onchange = drawCampo;
+for (const k of Object.keys(CAMPI))
+  Promise.all([fetch(`data/${k}.json`), fetch(`data/${k}-iso.json`)].map(f => f.then(r => r.ok ? r.json() : null)))
+    .then(([raw, iso]) => { if (raw) { dati[k] = {raw, iso}; drawCampo(); } }).catch(() => {});
 let dayTimer;
 document.getElementById("pgiorni").onclick = e => {
   if (dayTimer) { clearInterval(dayTimer); dayTimer = null; e.target.textContent = "▶ giorni"; return; }
@@ -60,7 +68,7 @@ document.getElementById("pgiorni").onclick = e => {
   dayTimer = setInterval(() => { daySel.selectedIndex = (daySel.selectedIndex + 1) % daySel.options.length; daySel.onchange(); }, 4000);
 };
 function load(day) {
-  drawRain();
+  drawCampo();
   return fetch(`data/wind-${day}.json`).then(r => r.json()).then(d => { frames = d; slider.max = d.length - 1; show(0); });
 }
 slider.oninput = () => show(+slider.value);
