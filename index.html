@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mappa del vento - Sardegna</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.css">
+<style>html,body,#map{height:100%;margin:0}#bar{position:absolute;z-index:1000;left:12px;right:12px;bottom:18px;background:#fffc;padding:8px 12px;border-radius:6px;font:14px sans-serif;display:flex;gap:10px;align-items:center}#bar input{flex:1}</style>
+</head><body>
+<div id="map"></div>
+<div id="bar"><button id="play">▶</button><input id="t" type="range" min="0" value="0"><span id="lbl"></span></div>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.js"></script>
+<script>
+const DAY = new URLSearchParams(location.search).get("day") || "2026-03-01";
+const map = L.map("map").setView([40.1, 9.0], 8);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "© OpenStreetMap", maxZoom: 12}).addTo(map);
+let layer, frames, timer;
+const slider = document.getElementById("t"), lbl = document.getElementById("lbl"), play = document.getElementById("play");
+function show(i) {
+  if (layer) map.removeLayer(layer);
+  const f = frames[i];
+  layer = L.velocityLayer({data: f, velocityScale: 0.01, maxVelocity: 15, displayValues: true,
+    displayOptions: {velocityType: "Vento", position: "bottomleft", emptyString: "nessun dato", speedUnit: "ms"}}).addTo(map);
+  lbl.textContent = `${f[0].header.refTime.slice(11, 16)} · ${f[0].header.nstazioni} stazioni`;
+  slider.value = i;
+}
+fetch(`data/wind-${DAY}.json`).then(r => r.json()).then(d => {
+  frames = d; slider.max = d.length - 1; show(0);
+  slider.oninput = () => show(+slider.value);
+  play.onclick = () => {
+    if (timer) { clearInterval(timer); timer = null; play.textContent = "▶"; return; }
+    play.textContent = "⏸"; timer = setInterval(() => show((+slider.value + 1) % frames.length), 1500);
+  };
+});
+</script></body></html>
