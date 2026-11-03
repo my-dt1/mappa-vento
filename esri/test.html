@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prova FlowRenderer su COG u/v</title>
+<script type="module" src="https://js.arcgis.com/5.1/"></script>
+<style>
+  html,body{height:100%;margin:0;font:13px sans-serif}
+  #pannello{position:absolute;z-index:10;left:12px;bottom:18px;max-width:340px;background:#fffe;padding:8px 12px;border-radius:6px;line-height:1.5}
+  #pannello select,#pannello button{margin:2px 4px 2px 0}
+  #stato{white-space:pre-wrap;font-family:monospace;font-size:12px}
+</style></head><body>
+<arcgis-map center="9.0,40.1" zoom="8"><arcgis-zoom slot="top-left"></arcgis-zoom></arcgis-map>
+<div id="pannello">
+  <b>Prova flusso (COG u/v)</b><br>
+  Ora <select id="ora"></select>
+  Verso <select id="rep"><option>flow-from</option><option>flow-to</option></select><br>
+  <button id="forza">Forza Vector-UV</button><br>
+  <div id="stato">caricamento…</div>
+  <span style="color:#555">Clic sulla mappa: valori u/v e direzione "da dove".</span>
+</div>
+<script type="module">
+const [Map, TileLayer, ImageryTileLayer, FlowRenderer] = await $arcgis.import([
+  "@arcgis/core/Map.js", "@arcgis/core/layers/TileLayer.js",
+  "@arcgis/core/layers/ImageryTileLayer.js", "@arcgis/core/renderers/FlowRenderer.js"]);
+const $ = id => document.getElementById(id), stato = $("stato");
+const log = (...t) => { stato.textContent = t.join("\n"); };
+const view = document.querySelector("arcgis-map");
+const GIORNO = new URLSearchParams(location.search).get("day") || "2026-03-01";
+
+// base scura Esri canvas (servizio pubblico, senza chiave): serve solo a far vedere le linee
+view.map = new Map({layers: [new TileLayer({url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer"})]});
+await view.componentOnReady();
+
+const renderer = rep => new FlowRenderer({
+  flowRepresentation: rep, trailWidth: "2px", density: 1, flowSpeed: 20, trailLength: 150,
+  visualVariables: [{type: "color", field: "Magnitude", stops: [
+    {value: 0, color: "#7fb9ff"}, {value: 3, color: "#5fe39a"}, {value: 6, color: "#ffd23f"},
+    {value: 9, color: "#ff5a4d"}, {value: 12, color: "#ff3d9a"}]}]});
+
+for (let h = 0; h < 24; h++) $("ora").add(new Option(String(h).padStart(2, "0") + ":00", String(h).padStart(2, "0")));
+$("ora").value = "12";
+
+let layer, forzato = false;
+async function carica() {
+  if (layer) view.map.remove(layer);
+  const url = new URL(`data/uv/${GIORNO}T${$("ora").value}.tif`, location.href).href;
+  layer = new ImageryTileLayer({url, renderer: renderer($("rep").value), opacity: 0.95});
+  view.map.add(layer);
+  try {
+    await layer.load();
+    if (forzato) {  // alternativa documentata dalla community se i metadati del file non bastano
+      const ri = layer.raster.rasterInfo;
+      ri.keyProperties = {...(ri.keyProperties ?? {}), DataType: "Vector-UV"};
+    }
+    const ri = layer.raster.rasterInfo;
+    log(`file: ${GIORNO}T${$("ora").value}.tif`, `bande: ${ri.bandCount}  dataType: ${ri.dataType}`,
+        `keyProperties: ${JSON.stringify(ri.keyProperties ?? {})}`, `forzato: ${forzato}`);
+    await view.whenLayerView(layer);
+  } catch (e) {
+    log("ERRORE: " + (e.message || e), "Se parla di tipo/Vector-UV prova «Forza Vector-UV».");
+  }
+}
+$("ora").onchange = $("rep").onchange = carica;
+$("forza").onclick = () => { forzato = true; carica(); };
+
+view.addEventListener("arcgisViewClick", async ({detail: {mapPoint}}) => {
+  if (!layer) return;
+  try {
+    const r = await layer.identify(mapPoint);
+    if (!r.value) { log("fuori dal raster"); return; }
+    const [u, v] = r.value;
+    const da = (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;  // direzione meteorologica: da dove soffia (N=0, E=90)
+    log(`u=${u.toFixed(2)} (est)  v=${v.toFixed(2)} (nord) m/s`, `velocita=${Math.hypot(u, v).toFixed(2)} m/s`,
+        `vento DA ${da.toFixed(0)}°  (verso ${((da + 180) % 360).toFixed(0)}°)`,
+        "Controlla che le linee vicine vadano verso quel punto cardinale.");
+  } catch (e) { log("identify fallita: " + (e.message || e)); }
+});
+await carica();
+</script></body></html>

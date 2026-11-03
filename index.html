@@ -12,16 +12,14 @@
 <script src="https://cdn.jsdelivr.net/npm/leaflet-velocity@2.1.4/dist/leaflet-velocity.min.js"></script>
 <script>
 const map = L.map("map").setView([40.1, 9.0], 8);
-const carto = (stile, nome) => L.tileLayer(`https://{s}.basemaps.cartocdn.com/${stile}/{z}/{x}/{y}{r}.png`, {attribution: "© OpenStreetMap © CARTO", subdomains: "abcd", maxZoom: 12});
 const esri = nome => L.tileLayer(`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/${nome}/MapServer/tile/{z}/{y}/{x}`, {attribution: "Esri", maxZoom: 12});
 const BASI = {
-  "Scura (CARTO)": carto("dark_all"), "Scura canvas (Esri)": esri("World_Dark_Gray_Base"),
-  "Chiara (CARTO)": carto("light_all"), "Chiara canvas (Esri)": esri("World_Light_Gray_Base"),
+  "Scura canvas (Esri)": esri("World_Dark_Gray_Base"), "Chiara canvas (Esri)": esri("World_Light_Gray_Base"),
   "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "© OpenStreetMap", maxZoom: 12})
 };
-const BASI_SCURE = ["Scura (CARTO)", "Scura canvas (Esri)"];
+const BASI_SCURE = ["Scura canvas (Esri)"];
 let scuro = true;  // il tema segue la base: colori chiari su sfondo scuro
-BASI["Scura (CARTO)"].addTo(map);
+BASI["Scura canvas (Esri)"].addTo(map);
 L.control.layers(BASI, null, {position: "topleft"}).addTo(map);
 map.on("baselayerchange", e => { scuro = BASI_SCURE.includes(e.name); aggiornaTema(); });
 const COLORI = ["#313695","#4575b4","#2c9fb8","#41ab5d","#e8a317","#f46d43","#d73027","#a50026"];  // vento su base chiara: debole -> forte

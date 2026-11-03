@@ -4,3 +4,4 @@ pyproj
 contourpy
 shapely
 pillow
+rasterio
